@@ -24,6 +24,13 @@ ensure_all_tasks = 5
 current_page = "main"
 users_frame = None
 
+# 新增：存储每个页面的滚动位置
+page_scroll_positions = {
+    "main": 0,
+    "task_list": 0,
+    "assign_rules": 0
+}
+
 def save_data():
     data = {
         "accounts": accounts,
@@ -63,22 +70,57 @@ def load_data():
                 if task['name'] not in assignment_count[user]:
                     assignment_count[user][task['name']] = 0
 
+def create_scrollable_frame(parent):
+    canvas = ttk.Canvas(parent)
+    scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+    scrollable_frame = ttk.Frame(canvas)
+
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    # 绑定鼠标滚轮事件
+    canvas.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+
+    return canvas, scrollable_frame
+
 def show_page(page):
     global current_page
+    
+    # 保存当前页面的滚动位置
+    if current_page and main_frame.winfo_children():
+        canvas = main_frame.winfo_children()[0]
+        if isinstance(canvas, ttk.Canvas):
+            page_scroll_positions[current_page] = canvas.yview()[0]
+    
     current_page = page
     for widget in main_frame.winfo_children():
         widget.destroy()
+    
+    canvas, scrollable_frame = create_scrollable_frame(main_frame)
+    
     if page == "main":
-        show_main_page()
+        show_main_page(scrollable_frame)
     elif page == "task_list":
-        show_task_list_page()
+        show_task_list_page(scrollable_frame)
     elif page == "assign_rules":
-        show_assign_rules_page()
+        show_assign_rules_page(scrollable_frame)
+    
+    # 恢复页面的滚动位置
+    canvas.update_idletasks()  # 确保所有部件都已经渲染
+    canvas.yview_moveto(page_scroll_positions[page])
 
-def show_main_page():
+def show_main_page(parent):
     global accounts, users_frame
 
-    create_user_frame = ttk.Frame(main_frame)
+    create_user_frame = ttk.Frame(parent)
     create_user_frame.pack(fill=X, padx=10, pady=10)
 
     entry_users = ttk.Entry(create_user_frame)
@@ -91,7 +133,7 @@ def show_main_page():
             for i in range(num_users):
                 accounts.append(f"{current_count + i + 1}")
             entry_users.delete(0, 'end')
-            update_user_display()
+            update_user_display(parent)
             save_data()
         except ValueError:
             messagebox.showerror("错误", "请输入有效的数字")
@@ -99,12 +141,12 @@ def show_main_page():
     create_button = ttk.Button(create_user_frame, text="创建", command=create_users)
     create_button.pack(side=LEFT)
 
-    users_frame = ttk.Frame(main_frame)
+    users_frame = ttk.Frame(parent)
     users_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
-    update_user_display()
+    update_user_display(parent)
 
-def update_user_display():
+def update_user_display(parent):
     global users_frame
     for widget in users_frame.winfo_children():
         widget.destroy()
@@ -148,11 +190,8 @@ def update_user_display():
 
                 ttk.Separator(task_frame, orient='horizontal', style="TaskSeparator.TSeparator").pack(fill=X, pady=2)
 
-def show_task_list_page():
-    for widget in main_frame.winfo_children():
-        widget.destroy()
-
-    task_list_frame = ttk.Frame(main_frame)
+def show_task_list_page(parent):
+    task_list_frame = ttk.Frame(parent)
     task_list_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
     for task in tasks:
@@ -177,17 +216,17 @@ def show_task_list_page():
                                          style="TaskDetail.TLabel")
                 detail_label.pack(side=LEFT, padx=2)
 
-        edit_button = ttk.Button(task_frame, text="编辑", command=lambda t=task: re_edit_task(t))
+        edit_button = ttk.Button(task_frame, text="编辑", command=lambda t=task: re_edit_task(t, parent))
         edit_button.pack(side=RIGHT, padx=5)
 
         delete_button = ttk.Button(task_frame, text="删除", command=lambda t=task: delete_task(t))
         delete_button.pack(side=RIGHT, padx=5)
 
-    add_task_button = ttk.Button(main_frame, text="添加新任务", command=show_add_task)
+    add_task_button = ttk.Button(parent, text="添加新任务", command=lambda: show_add_task(parent))
     add_task_button.pack(pady=10)
 
-def show_add_task():
-    task_window = ttk.Frame(main_frame)
+def show_add_task(parent):
+    task_window = ttk.Frame(parent)
     task_window.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
     name_frame = ttk.Frame(task_window)
@@ -257,8 +296,8 @@ def show_add_task():
     cancel_button = ttk.Button(task_window, text="取消", bootstyle=SECONDARY, command=lambda: show_page("task_list"))
     cancel_button.pack(side=LEFT, padx=5, pady=10)
 
-def re_edit_task(task):
-    task_window = ttk.Frame(main_frame)
+def re_edit_task(task, parent):
+    task_window = ttk.Frame(parent)
     task_window.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
     name_frame = ttk.Frame(task_window)
@@ -345,13 +384,10 @@ def delete_task(task):
     save_data()
     show_page("task_list")
 
-def show_assign_rules_page():
+def show_assign_rules_page(parent):
     global min_tasks, max_tasks, random_assign, ensure_all_tasks
 
-    for widget in main_frame.winfo_children():
-        widget.destroy()
-
-    task_count_frame = ttk.Frame(main_frame)
+    task_count_frame = ttk.Frame(parent)
     task_count_frame.pack(fill=X, padx=10, pady=5)
 
     ttk.Label(task_count_frame, text="最小任务数:").pack(side=LEFT)
@@ -365,17 +401,17 @@ def show_assign_rules_page():
     max_tasks_entry.pack(side=LEFT)
 
     random_var = ttk.BooleanVar(value=random_assign)
-    random_check = ttk.Checkbutton(main_frame, text="启用随机分配", variable=random_var)
+    random_check = ttk.Checkbutton(parent, text="启用随机分配", variable=random_var)
     random_check.pack(anchor=W, padx=10, pady=5)
 
-    ensure_frame = ttk.Frame(main_frame)
+    ensure_frame = ttk.Frame(parent)
     ensure_frame.pack(fill=X, padx=10, pady=5)
     ttk.Label(ensure_frame, text="在多少次分配中确保所有任务被选择:").pack(side=LEFT)
     ensure_entry = ttk.Entry(ensure_frame, width=5)
     ensure_entry.insert(0, str(ensure_all_tasks))
     ensure_entry.pack(side=LEFT)
 
-    save_button = ttk.Button(main_frame, text="保存设置", command=lambda: save_settings(
+    save_button = ttk.Button(parent, text="保存设置", command=lambda: save_settings(
         int(min_tasks_entry.get()),
         int(max_tasks_entry.get()),
         random_var.get(),
@@ -383,7 +419,7 @@ def show_assign_rules_page():
     ))
     save_button.pack(pady=10)
 
-    apply_button = ttk.Button(main_frame, text="应用规则", command=apply_rules)
+    apply_button = ttk.Button(parent, text="应用规则", command=apply_rules)
     apply_button.pack(pady=10)
 
 def save_settings(min_t, max_t, random_a, ensure_t):
@@ -451,23 +487,8 @@ root = ttk.Window(themename="cosmo")
 root.title("任务管理器")
 root.geometry("600x400")
 
-# 创建画布和滚动条
-canvas = ttk.Canvas(root)
-scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
-scrollable_frame = ttk.Frame(canvas)
-
-scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-canvas.pack(side=LEFT, fill=BOTH, expand=True)
-scrollbar.pack(side=RIGHT, fill=Y)
-canvas.configure(yscrollcommand=scrollbar.set)
-
-# 绑定鼠标滚轮事件
-canvas.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
-
 # 创建顶部按钮框架
-top_frame = ttk.Frame(scrollable_frame)
+top_frame = ttk.Frame(root)
 top_frame.pack(side=TOP, fill=X, padx=10, pady=10)
 
 for i in range(3):
@@ -484,7 +505,7 @@ for i, (text, page, style) in enumerate(buttons):
     ttk.Button(top_frame, text=text, bootstyle=style, command=lambda p=page: show_page(p)).grid(row=0, column=i, sticky="ew", padx=5, pady=5)
 
 # 创建主页面框架
-main_frame = ttk.Frame(scrollable_frame)
+main_frame = ttk.Frame(root)
 main_frame.pack(fill=BOTH, expand=True)
 
 # 自定义样式
